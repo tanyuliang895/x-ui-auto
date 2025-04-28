@@ -20,7 +20,8 @@ apt update -y && apt install -y curl wget sudo socat openssl bash-completion || 
 mkdir -p /etc/x-ui-cert
 
 green "生成自签TLS证书..."
-openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/C=CN/ST=Internet/L=Cloud/O=SelfSigned/OU=IT/CN=$(curl -s ipv4.ip.sb)" -keyout /etc/x-ui-cert/private.key -out /etc/x-ui-cert/cert.crt
+IP=$(curl -s ipv4.ip.sb)
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/C=CN/ST=Internet/L=Cloud/O=SelfSigned/OU=IT/CN=${IP}" -keyout /etc/x-ui-cert/private.key -out /etc/x-ui-cert/cert.crt
 
 green "下载安装x-ui面板..."
 bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
@@ -29,13 +30,9 @@ bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 systemctl enable x-ui
 systemctl restart x-ui
 
-# 设置账号密码端口和TLS证书
+# 设置账号密码端口和TLS证书（在一次命令中完成）
 green "配置账号密码端口及TLS证书..."
-x-ui setting -username ${USERNAME} -password ${PASSWORD}
-x-ui setting -port ${PORT}
-x-ui setting -cert /etc/x-ui-cert/cert.crt
-x-ui setting -key /etc/x-ui-cert/private.key
-x-ui setting -tls true
+x-ui setting -username ${USERNAME} -password ${PASSWORD} -port ${PORT} -cert /etc/x-ui-cert/cert.crt -key /etc/x-ui-cert/private.key -tls true
 
 systemctl restart x-ui
 
@@ -52,7 +49,6 @@ else
 fi
 
 # 显示最终信息
-IP=$(curl -s ipv4.ip.sb)
 echo "============================================"
 echo "x-ui 安装完成！请使用以下信息访问："
 echo "访问地址: https://${IP}:${PORT}"
