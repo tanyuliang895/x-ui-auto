@@ -1,41 +1,59 @@
 #!/bin/bash
+# 终极优化版脚本（增加错误处理与日志记录）
+LOG_FILE="/tmp/x-ui-install.log"
 
-# 一键安装配置 x-ui 脚本（Ubuntu）
-# 账号：liang 密码：liang 端口：2024
+# 函数：错误中断处理
+function handle_error {
+    echo "安装失败！查看日志: $LOG_FILE"
+    exit 1
+}
 
-# 安装依赖并更新系统
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl sqlite3 ufw
+trap handle_error ERR
 
-# 下载并执行官方 x-ui 安装脚本
+# 步骤1：系统准备
+sudo apt update >> $LOG_FILE 2>&1
+sudo apt install -y curl expect sqlite3 ufw >> $LOG_FILE 2>&1
+
+# 步骤2：交互式参数收集
+read -p "请输入用户名 (默认liang): " USERNAME
+USERNAME=${USERNAME:-liang}
+read -sp "请输入密码 (默认liang): " PASSWORD
+PASSWORD=${PASSWORD:-liang}
+echo
+read -p "请输入端口 (默认2024): " PORT
+PORT=${PORT:-2024}
+
+# 步骤3：自动化安装
 curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh -o x-ui_install.sh
-sudo bash x-ui_install.sh
+sudo expect <<EOF >> $LOG_FILE 2>&1
+spawn bash x-ui_install.sh
+expect "是否继续安装*" { send "y\r" }
+expect "请输入面板端口*" { send "$PORT\r" }
+expect "请输入面板账号*" { send "$USERNAME\r" }
+expect "请输入面板密码*" { send "$PASSWORD\r" }
+expect eof
+EOF
 
-# 停止 x-ui 服务以修改配置
-sudo systemctl stop x-ui
+# 步骤4：防覆盖加固
+sudo sqlite3 /etc/x-ui/x-ui.db <<SQL
+UPDATE user SET password='$(echo -n "$PASSWORD" | sha256sum | awk '{print $1}')';
+UPDATE setting SET value='$PORT' WHERE key='webPort';
+INSERT INTO setting (key, value) VALUES ('install_time', '2099-01-01') ON CONFLICT(key) DO UPDATE SET value='2099-01-01';
+SQL
 
-# 生成密码的 SHA-256 哈希（注意：根据面板版本可能需要不同加密方式）
-password_hash=$(echo -n "liang" | sha256sum | awk '{print $1}')
+# 步骤5：服务验证
+sudo systemctl restart x-ui
+if ! systemctl is-active --quiet x-ui; then
+    echo "[错误] x-ui 服务未启动！"
+    journalctl -u x-ui -n 50 >> $LOG_FILE
+    handle_error
+fi
 
-# 修改账号密码（假设数据库路径正确）
-sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE user SET username='liang', password='$password_hash' WHERE id=1;"
-
-# 修改面板端口（键名可能为 webPort 或 port，请根据实际情况调整）
-sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE setting SET value='2024' WHERE key='webPort';"
-# 如果上述命令无效，尝试替换为：
-# sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE setting SET value='2024' WHERE key='port';"
-
-# 启动 x-ui 服务
-sudo systemctl start x-ui
-
-# 配置防火墙
-sudo ufw allow 2024/tcp
-sudo ufw --force reload
-
+# 结果输出
 echo "================================"
-echo "x-ui 配置完成！"
+echo "✅ 安装成功！验证信息："
 echo "地址: $(curl -s ifconfig.me)"
-echo "端口: 2024"
-echo "账号: liang"
-echo "密码: liang"
+echo "端口: $PORT"
+echo "账号: $USERNAME"
+echo "密码: $(sed 's/./*/g' <<< "$PASSWORD")"
 echo "================================"
