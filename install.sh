@@ -1,45 +1,102 @@
 #!/bin/bash
-# X-UI/Xray 服务修复脚本
-# 作者：tanyuliang895
-# 修复内容：服务无法启动/配置错误/权限问题
 
-# 强制配置参数
-USERNAME="liang"
-PASSWORD="liang"
-PORT="2024"
+# ================================================
+# X-UI 全自动管理脚本
+# 功能：安装/更新 + 固定账号密码 + 自签证书 + 防火墙
+# 作者：tanyuliang895
+# ================================================
+
+# 配置区（按需修改）
+USERNAME="admin"        # 面板登录账号
+PASSWORD="admin@1234"   # 面板登录密码（建议修改）
+PORT="2053"             # 面板端口（建议50000以上）
+TLS_DOMAIN="auto"       # 证书域名（auto=自动获取IP，或填写自定义域名）
+
+# 全局变量
+LOG_FILE="/tmp/x-ui-auto-install.log"
 TLS_DIR="/etc/x-ui/cert"
 
 # 颜色定义
 RED='\033[31m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
+BLUE='\033[34m'
 RESET='\033[0m'
 
-# 停止并清理旧服务
-echo -e "${YELLOW}[1/7] 正在停止并清理旧服务...${RESET}"
-systemctl stop x-ui xray &> /dev/null
-killall -9 x-ui xray &> /dev/null
-rm -rf /etc/systemd/system/x-ui.service /etc/systemd/system/xray.service
-systemctl daemon-reload
+# 初始化日志
+echo "=== X-UI 安装日志 $(date '+%Y-%m-%d %H:%M:%S') ===" > $LOG_FILE
 
-# 修复证书权限
-echo -e "${YELLOW}[2/7] 修复证书权限...${RESET}"
-mkdir -p $TLS_DIR
-chmod 700 $TLS_DIR
-openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-  -subj "/C=CN/ST=Beijing/O=MyPanel/CN=$(curl -s ipv4.ip.sb)" \
-  -keyout $TLS_DIR/private.key \
-  -out $TLS_DIR/cert.crt &> /dev/null
-chmod 600 $TLS_DIR/*
-chown -R nobody:nogroup $TLS_DIR
+# 日志记录函数
+log() {
+    echo -e "$1" | tee -a $LOG_FILE
+}
 
-# 强制重装 X-UI
-echo -e "${YELLOW}[3/7] 重新安装 X-UI...${RESET}"
-bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh) <<< y
+# 错误处理函数
+die() {
+    log "${RED}[ERROR] $1${RESET}"
+    log "${YELLOW}详细日志见：$LOG_FILE${RESET}"
+    exit 1
+}
 
-# 写入锁定配置
-echo -e "${YELLOW}[4/7] 写入防篡改配置...${RESET}"
-cat > /etc/x-ui/x-ui.db <<EOF
+# 预检环节
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        die "必须使用 root 用户运行此脚本！"
+    fi
+    log "${GREEN}[1/8] 权限检查通过${RESET}"
+}
+
+clean_legacy() {
+    log "${BLUE}[2/8] 清理旧版本配置...${RESET}"
+    systemctl stop x-ui xray &>> $LOG_FILE
+    rm -rf /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service &>> $LOG_FILE
+}
+
+install_deps() {
+    log "${BLUE}[3/8] 安装系统依赖...${RESET}"
+    if grep -Eqi "ubuntu|debian" /etc/os-release; then
+        apt update -y &>> $LOG_FILE || die "系统更新失败"
+        apt install -y curl wget socat openssl &>> $LOG_FILE || die "依赖安装失败"
+    else
+        yum update -y &>> $LOG_FILE || die "系统更新失败"
+        yum install -y curl wget socat openssl &>> $LOG_FILE || die "依赖安装失败"
+    fi
+}
+
+setup_cert() {
+    log "${BLUE}[4/8] 配置TLS证书...${RESET}"
+    mkdir -p $TLS_DIR
+    if [[ "$TLS_DOMAIN" == "auto" ]]; then
+        TLS_DOMAIN=$(curl -s ipv4.ip.sb)
+    fi
+
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -subj "/C=US/ST=California/L=San Francisco/O=MyCompany/CN=$TLS_DOMAIN" \
+        -keyout $TLS_DIR/private.key \
+        -out $TLS_DIR/cert.crt &>> $LOG_FILE || die "证书生成失败"
+
+    chmod 600 $TLS_DIR/* &>> $LOG_FILE
+}
+
+install_xui() {
+    log "${BLUE}[5/8] 安装/更新X-UI面板...${RESET}"
+    bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh) &>> $LOG_FILE <<EOF
+y
+y
+EOF
+
+    # 等待服务初始化
+    for i in {1..10}; do
+        if [[ -f /etc/x-ui/x-ui.db ]]; then
+            break
+        fi
+        sleep 1
+    done
+}
+
+configure_panel() {
+    log "${BLUE}[6/8] 强制应用配置...${RESET}"
+    cat > /etc/x-ui/x-ui.db <<EOF
 {
   "web": {
     "username": "$USERNAME",
@@ -52,44 +109,66 @@ cat > /etc/x-ui/x-ui.db <<EOF
 }
 EOF
 
-# 修复服务文件
-echo -e "${YELLOW}[5/7] 修复 systemd 服务...${RESET}"
-cat > /etc/systemd/system/x-ui.service <<EOF
-[Unit]
-Description=X-UI Service
-After=network.target
+    # 修复权限
+    chown -R x-ui:x-ui /etc/x-ui &>> $LOG_FILE
+}
 
-[Service]
-User=root
-Group=root
-ExecStart=/usr/local/x-ui/x-ui
-Restart=always
-RestartSec=3
-LimitNOFILE=65535
+setup_firewall() {
+    log "${BLUE}[7/8] 配置防火墙规则...${RESET}"
+    if command -v ufw &>> $LOG_FILE; then
+        ufw allow $PORT/tcp &>> $LOG_FILE
+        ufw reload &>> $LOG_FILE
+    elif command -v firewall-cmd &>> $LOG_FILE; then
+        firewall-cmd --permanent --add-port=$PORT/tcp &>> $LOG_FILE
+        firewall-cmd --reload &>> $LOG_FILE
+    else
+        iptables -I INPUT -p tcp --dport $PORT -j ACCEPT &>> $LOG_FILE
+    fi
+}
 
-[Install]
-WantedBy=multi-user.target
-EOF
+start_service() {
+    log "${BLUE}[8/8] 启动服务...${RESET}"
+    systemctl daemon-reload &>> $LOG_FILE
+    systemctl enable x-ui &>> $LOG_FILE
+    systemctl restart x-ui &>> $LOG_FILE
 
-# 重启服务
-echo -e "${YELLOW}[6/7] 启动服务...${RESET}"
-systemctl daemon-reload
-systemctl enable x-ui --now &> /dev/null
-sleep 5
+    # 验证服务状态
+    sleep 3
+    if ! systemctl is-active --quiet x-ui; then
+        die "X-UI服务启动失败，请检查日志"
+    fi
+}
 
-# 诊断报告
-echo -e "${YELLOW}[7/7] 生成诊断报告:${RESET}"
-echo "----------------------------------------"
-echo -e "X-UI 状态: $(systemctl is-active x-ui)"
-echo -e "Xray 状态: $(pgrep xray >/dev/null && echo 正常 || echo 异常)"
-echo -e "端口监听: $(ss -tulnp | grep $PORT || echo 未检测到)"
-echo -e "防火墙规则:"
-iptables -L INPUT -n | grep $PORT || echo -e "${RED}未检测到防火墙规则${RESET}"
-echo "----------------------------------------"
+show_result() {
+    clear
+    echo -e "${GREEN}
+    ██╗  ██╗    ██╗   ██╗██╗
+    ╚██╗██╔╝    ╚██╗ ██╔╝██║
+     ╚███╔╝      ╚████╔╝ ██║
+     ██╔██╗       ╚██╔╝  ██║
+    ██╔╝ ██╗       ██║   ██║
+    ╚═╝  ╚═╝       ╚═╝   ╚═╝
+    ${RESET}"
+    echo -e "${GREEN}✅ X-UI 已成功部署！${RESET}"
+    echo -e "========================================"
+    echo -e "面板地址: ${YELLOW}https://${TLS_DOMAIN}:${PORT}${RESET}"
+    echo -e "用户名: ${YELLOW}${USERNAME}${RESET}"
+    echo -e "密码: ${YELLOW}${PASSWORD}${RESET}"
+    echo -e "========================================"
+    echo -e "${BLUE}首次访问需忽略浏览器证书警告${RESET}"
+    echo -e "${BLUE}详细日志: ${YELLOW}${LOG_FILE}${RESET}"
+}
 
-# 最终验证
-if systemctl is-active --quiet x-ui; then
-  echo -e "${GREEN}✅ 服务修复完成！访问地址: https://$(curl -s ipv4.ip.sb):$PORT ${RESET}"
-else
-  echo -e "${RED}❌ 修复失败，请检查日志: journalctl -u x-ui -n 50 ${RESET}"
-fi
+main() {
+    check_root
+    clean_legacy
+    install_deps
+    setup_cert
+    install_xui
+    configure_panel
+    setup_firewall
+    start_service
+    show_result
+}
+
+main
