@@ -1,39 +1,41 @@
 #!/bin/bash
 
-# 更新系统
-echo "正在更新系统..."
-apt update -y && apt upgrade -y
+# 检查是否为root用户
+if [ "$(id -u)" != "0" ]; then
+    echo "错误：必须使用root权限运行此脚本，请使用 'sudo bash $0' 或切换至root用户。"
+    exit 1
+fi
 
-# 安装必备工具
-echo "安装curl和wget..."
-apt install curl wget ufw -y
+# 更新系统并安装依赖
+apt update && apt upgrade -y
+apt install -y curl sqlite3 ufw python3-pip
 
-# 删除可能已存在的 x-ui 目录
-echo "删除旧的x-ui安装目录（如果有的话）..."
-rm -rf /usr/local/x-ui
+# 安装Python bcrypt库
+pip3 install bcrypt
 
-# 下载并安装 x-ui
-echo "正在下载并安装x-ui..."
-curl -s https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh | bash
+# 下载并安装x-ui面板
+bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 
-# 设置 x-ui 的账号、密码和端口
-echo "配置 x-ui 账号、密码和端口..."
-x-ui account add liang liang
-sed -i 's/"port": 2020/"port": 2024/' /etc/x-ui/x-ui.json
+# 生成密码的bcrypt哈希
+HASH=$(python3 -c 'import bcrypt; print(bcrypt.hashpw(b"liang", bcrypt.gensalt()).decode())')
 
-# 启动 x-ui 服务
-echo "启动 x-ui 服务..."
-systemctl enable x-ui
-systemctl start x-ui
+# 修改数据库配置
+SQLITE_DB="/etc/x-ui/x-ui.db"
+sqlite3 "$SQLITE_DB" "UPDATE users SET username='liang', password='$HASH' WHERE id=1;"
+sqlite3 "$SQLITE_DB" "UPDATE setting SET value='2024' WHERE key='web_port';"
 
-# 配置防火墙，允许端口 2024
-echo "配置防火墙，允许访问端口 2024..."
-ufw allow 2024/tcp
-ufw reload
+# 配置防火墙
+ufw allow 2024
+ufw --force enable
 
-# 完成安装
-echo "x-ui 安装完成！"
-echo "账号：liang"
-echo "密码：liang"
-echo "端口：2024"
-echo "访问面板地址： http://<服务器IP>:2024"
+# 重启服务使配置生效
+systemctl restart x-ui
+
+# 输出访问信息
+PUBLIC_IP=$(curl -s ifconfig.me)
+echo "安装完成！"
+echo "==============================="
+echo "面板地址: http://${PUBLIC_IP}:2024"
+echo "用户名: liang"
+echo "密码: liang"
+echo "==============================="
