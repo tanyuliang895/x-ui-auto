@@ -1,45 +1,110 @@
 #!/bin/bash
 
-# 设置默认用户名、密码和端口
-USER="liang"
+# 智能全自动安装x-ui + 自动设置账号密码端口 + 检测安装状态
+# 作者：tanyuliang895
+# 日期：2025-04-28
+
+USERNAME="liang"
 PASSWORD="liang"
 PORT="2024"
 
-# 检查是否是 Ubuntu 22.04
-if [[ $(lsb_release -r | awk '{print $2}') != "22.04" ]]; then
-    echo "这个脚本只支持 Ubuntu 22.04"
+green(){ echo -e "\033[32m$1\033[0m"; }
+red(){ echo -e "\033[31m$1\033[0m"; }
+
+# 确保脚本是以root身份运行
+[[ $EUID -ne 0 ]] && red "请使用 root 用户运行！" && exit 1
+
+# 检测操作系统类型
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+else
+    red "无法识别操作系统类型，退出脚本"
     exit 1
 fi
 
-# 更新系统
-echo "更新系统..."
-sudo apt update && sudo apt upgrade -y
+# 获取服务器IP
+IP=$(curl -s ipv4.ip.sb || curl -s ipinfo.io/ip)
+
+# 输出欢迎信息
+clear
+green "============================================"
+green "          欢迎使用 x-ui 一键安装脚本"
+green "         当前服务器IP: ${IP}"
+green "         操作系统: ${PRETTY_NAME:-$OS}"
+green "============================================"
+echo
 
 # 安装依赖
-echo "安装依赖..."
-sudo apt install -y wget curl unzip jq
+install_dependencies(){
+    if [[ $OS =~ (ubuntu|debian) ]]; then
+        apt update -y && apt install -y curl wget sudo socat openssl bash-completion net-tools || {
+            red "安装依赖失败，请检查网络连接。"
+            exit 1
+        }
+    elif [[ $OS =~ (centos|rocky|almalinux) ]]; then
+        yum update -y && yum install -y curl wget sudo socat openssl bash-completion net-tools || {
+            red "安装依赖失败，请检查网络连接。"
+            exit 1
+        }
+    else
+        red "暂不支持此操作系统类型：$OS"
+        exit 1
+    fi
+}
 
-# 获取最新版本的 x-ui 下载链接
-echo "获取最新版本的 x-ui 下载链接..."
-LATEST_RELEASE=$(curl -s https://api.github.com/repos/vaxilu/x-ui/releases/latest | jq -r .assets[0].browser_download_url)
-if [ -z "$LATEST_RELEASE" ]; then
-    echo "获取最新版本失败，请检查 GitHub Release 页面。"
-    exit 1
+# 检测是否已安装x-ui
+if [[ ! -f /usr/local/x-ui/x-ui ]]; then
+    green "开始安装x-ui..."
+    bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh) || {
+        red "x-ui安装失败，请检查网络或手动安装！"
+        exit 1
+    }
+else
+    yellow "检测到 x-ui 已安装，跳过安装步骤。"
 fi
 
-# 下载 x-ui
-echo "下载并解压 x-ui..."
-wget $LATEST_RELEASE -O x-ui-linux-amd64.tar.gz
-tar -xzf x-ui-linux-amd64.tar.gz
-cd x-ui
+# 配置x-ui面板
+green "自动配置账号、密码、端口..."
+/usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}" -port "${PORT}"
 
-# 配置 x-ui
-echo "配置 x-ui..."
-sudo ./x-ui install
-sudo ./x-ui set account "$USER" password "$PASSWORD" port "$PORT"
+# 启动并设置x-ui开机自启
+systemctl enable x-ui
+systemctl restart x-ui
 
-# 启动 x-ui
-echo "启动 x-ui..."
-sudo ./x-ui start
+# 防火墙配置
+green "配置防火墙..."
+if command -v ufw &> /dev/null; then
+    ufw allow ${PORT}/tcp
+    ufw reload
+elif command -v firewall-cmd &> /dev/null; then
+    firewall-cmd --permanent --add-port=${PORT}/tcp
+    firewall-cmd --reload
+else
+    green "未检测到防火墙，跳过防火墙配置。"
+fi
 
-echo "安装完成，x-ui 已成功安装并配置。"
+# 检查端口是否监听
+sleep 2
+if ss -lntp | grep ":${PORT}" &> /dev/null; then
+    green "✅ 端口 ${PORT} 已成功监听，x-ui启动成功！"
+else
+    red "❌ 端口 ${PORT} 未监听，请检查x-ui服务状态！"
+    systemctl status x-ui
+fi
+
+# 显示面板信息
+echo -e "\n============================================"
+green "x-ui 安装完成！面板信息如下："
+echo "访问地址: http://${IP}:${PORT}"
+echo "账号: ${USERNAME}"
+echo "密码: ${PASSWORD}"
+echo "============================================"
+
+# 显示二维码（可选）
+if command -v qrencode &> /dev/null; then
+    green "扫码快速访问面板："
+    echo "http://${IP}:${PORT}" | qrencode -o - -t ANSIUTF8
+else
+    yellow "未检测到qrencode，无法生成二维码。"
+fi
