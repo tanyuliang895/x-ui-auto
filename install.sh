@@ -1,56 +1,95 @@
 #!/bin/bash
-# 强制锁定配置：账号=liang 密码=liang 端口=2024
+# X-UI/Xray 服务修复脚本
+# 作者：tanyuliang895
+# 修复内容：服务无法启动/配置错误/权限问题
 
-# 固定配置（不可修改）
-_USER="liang"
-_PASS="liang"
-_PORT="2024"
-_TLS_DIR="/etc/x-ui/cert"
+# 强制配置参数
+USERNAME="liang"
+PASSWORD="liang"
+PORT="2024"
+TLS_DIR="/etc/x-ui/cert"
 
-# --- 核心函数：强制写入配置 ---
-force_config() {
-    # 删除旧配置
-    rm -rf /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service
+# 颜色定义
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+RESET='\033[0m'
 
-    # 安装X-UI（非交互模式）
-    echo -e "y\n" | bash <(curl -sL https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+# 停止并清理旧服务
+echo -e "${YELLOW}[1/7] 正在停止并清理旧服务...${RESET}"
+systemctl stop x-ui xray &> /dev/null
+killall -9 x-ui xray &> /dev/null
+rm -rf /etc/systemd/system/x-ui.service /etc/systemd/system/xray.service
+systemctl daemon-reload
 
-    # 生成自签名证书
-    mkdir -p $_TLS_DIR
-    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-        -subj "/C=CN/ST=Beijing/O=MyPanel/CN=$(curl -s ipv4.ip.sb)" \
-        -keyout $_TLS_DIR/private.key -out $_TLS_DIR/cert.crt &>/dev/null
+# 修复证书权限
+echo -e "${YELLOW}[2/7] 修复证书权限...${RESET}"
+mkdir -p $TLS_DIR
+chmod 700 $TLS_DIR
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+  -subj "/C=CN/ST=Beijing/O=MyPanel/CN=$(curl -s ipv4.ip.sb)" \
+  -keyout $TLS_DIR/private.key \
+  -out $TLS_DIR/cert.crt &> /dev/null
+chmod 600 $TLS_DIR/*
+chown -R nobody:nogroup $TLS_DIR
 
-    # 直接修改数据库文件（绕过x-ui setting命令）
-    cat > /etc/x-ui/x-ui.db <<EOF
+# 强制重装 X-UI
+echo -e "${YELLOW}[3/7] 重新安装 X-UI...${RESET}"
+bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh) <<< y
+
+# 写入锁定配置
+echo -e "${YELLOW}[4/7] 写入防篡改配置...${RESET}"
+cat > /etc/x-ui/x-ui.db <<EOF
 {
   "web": {
-    "username": "$_USER",
-    "password": "$_PASS",
-    "port": $_PORT,
+    "username": "$USERNAME",
+    "password": "$PASSWORD",
+    "port": $PORT,
     "tls": true,
-    "cert": "$_TLS_DIR/cert.crt",
-    "key": "$_TLS_DIR/private.key"
+    "cert": "$TLS_DIR/cert.crt",
+    "key": "$TLS_DIR/private.key"
   }
 }
 EOF
 
-    # 重启服务并设置防火墙
-    systemctl restart x-ui
-    if command -v ufw &>/dev/null; then
-        ufw allow $_PORT/tcp &>/dev/null
-    elif command -v firewall-cmd &>/dev/null; then
-        firewall-cmd --add-port=$_PORT/tcp --permanent &>/dev/null
-        firewall-cmd --reload &>/dev/null
-    else
-        iptables -A INPUT -p tcp --dport $_PORT -j ACCEPT &>/dev/null
-    fi
-}
+# 修复服务文件
+echo -e "${YELLOW}[5/7] 修复 systemd 服务...${RESET}"
+cat > /etc/systemd/system/x-ui.service <<EOF
+[Unit]
+Description=X-UI Service
+After=network.target
 
-# --- 主执行流程 ---
-echo "正在强制应用配置..."
-force_config
-echo -e "\033[32m配置已锁定！\033[0m"
-echo "账号: $_USER"
-echo "密码: $_PASS"
-echo "端口: $_PORT"
+[Service]
+User=root
+Group=root
+ExecStart=/usr/local/x-ui/x-ui
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 重启服务
+echo -e "${YELLOW}[6/7] 启动服务...${RESET}"
+systemctl daemon-reload
+systemctl enable x-ui --now &> /dev/null
+sleep 5
+
+# 诊断报告
+echo -e "${YELLOW}[7/7] 生成诊断报告:${RESET}"
+echo "----------------------------------------"
+echo -e "X-UI 状态: $(systemctl is-active x-ui)"
+echo -e "Xray 状态: $(pgrep xray >/dev/null && echo 正常 || echo 异常)"
+echo -e "端口监听: $(ss -tulnp | grep $PORT || echo 未检测到)"
+echo -e "防火墙规则:"
+iptables -L INPUT -n | grep $PORT || echo -e "${RED}未检测到防火墙规则${RESET}"
+echo "----------------------------------------"
+
+# 最终验证
+if systemctl is-active --quiet x-ui; then
+  echo -e "${GREEN}✅ 服务修复完成！访问地址: https://$(curl -s ipv4.ip.sb):$PORT ${RESET}"
+else
+  echo -e "${RED}❌ 修复失败，请检查日志: journalctl -u x-ui -n 50 ${RESET}"
+fi
