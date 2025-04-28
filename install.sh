@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# x-ui 一键安装+自动设置账号密码端口（无证书版，真正自动化）
+# 一键安装 x-ui + 自动设置账号密码端口（无证书版，绕过安全提示）
 
 USERNAME="liang"
 PASSWORD="liang"
@@ -27,11 +27,11 @@ fi
 green "开始安装 x-ui..."
 bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 
-# 停止x-ui
+# 停止x-ui服务
 green "停止x-ui服务以便修改数据库..."
 systemctl stop x-ui
 
-# 检查数据库文件存在
+# 修改数据库文件
 DB_FILE="/etc/x-ui/x-ui.db"
 if [ -f "$DB_FILE" ]; then
     green "正在修改数据库，设置账号密码端口..."
@@ -46,7 +46,7 @@ green "重启x-ui服务..."
 systemctl restart x-ui
 systemctl enable x-ui
 
-# 防火墙放行端口
+# 配置防火墙
 green "配置防火墙放行端口..."
 if command -v ufw &> /dev/null; then
     ufw allow "${PORT}/tcp"
@@ -58,7 +58,7 @@ else
     green "未检测到常规防火墙，跳过放行步骤"
 fi
 
-# 显示最终访问信息
+# 显示访问信息
 IP=$(curl -s ipv4.ip.sb)
 echo "======================================="
 echo "✅ x-ui 安装并设置完成！"
