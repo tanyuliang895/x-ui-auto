@@ -9,11 +9,13 @@ echo "账号：$USERNAME"
 echo "密码：$PASSWORD"
 echo "端口：$PORT"
 
-# 安装依赖
-apt update && apt install -y wget curl
+# 更新系统并安装依赖
+sudo apt update && sudo apt install -y wget curl
 
 # 下载 X-UI 安装包
 wget https://github.com/vaxilu/x-ui/releases/download/v1.3.3/x-ui-linux-amd64.tar.gz -O /tmp/x-ui.tar.gz
+
+# 解压安装包
 tar -xzvf /tmp/x-ui.tar.gz -C /usr/local/bin
 
 # 配置 X-UI 面板
