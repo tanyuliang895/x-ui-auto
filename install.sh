@@ -1,41 +1,38 @@
 #!/bin/bash
+# x-ui 完全重置脚本（Ubuntu）
+# 功能：清除所有配置、文件、端口规则及服务残留
 
-# 一键安装配置 x-ui 脚本（Ubuntu）
-# 账号：liang 密码：liang 端口：2024
+# 强制停止并移除服务
+sudo systemctl stop x-ui 2>/dev/null
+sudo systemctl disable x-ui 2>/dev/null
+sudo rm -f /etc/systemd/system/x-ui.service
 
-# 安装依赖并更新系统
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl sqlite3 ufw
+# 删除所有相关文件（覆盖已知安装路径）
+sudo rm -rf \
+  /etc/x-ui \
+  /usr/local/x-ui \
+  /var/log/x-ui.log \
+  ~/x-ui* \
+  /tmp/x-ui*
 
-# 下载并执行官方 x-ui 安装脚本
-curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh -o x-ui_install.sh
-sudo bash x-ui_install.sh
-
-# 停止 x-ui 服务以修改配置
-sudo systemctl stop x-ui
-
-# 生成密码的 SHA-256 哈希（注意：根据面板版本可能需要不同加密方式）
-password_hash=$(echo -n "liang" | sha256sum | awk '{print $1}')
-
-# 修改账号密码（假设数据库路径正确）
-sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE user SET username='liang', password='$password_hash' WHERE id=1;"
-
-# 修改面板端口（键名可能为 webPort 或 port，请根据实际情况调整）
-sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE setting SET value='2024' WHERE key='webPort';"
-# 如果上述命令无效，尝试替换为：
-# sudo sqlite3 /etc/x-ui/x-ui.db "UPDATE setting SET value='2024' WHERE key='port';"
-
-# 启动 x-ui 服务
-sudo systemctl start x-ui
-
-# 配置防火墙
-sudo ufw allow 2024/tcp
+# 清理防火墙规则（自动适配2024端口）
+sudo ufw delete allow 2024/tcp 2>/dev/null
 sudo ufw --force reload
 
-echo "================================"
-echo "x-ui 配置完成！"
-echo "地址: $(curl -s ifconfig.me)"
-echo "端口: 2024"
-echo "账号: liang"
-echo "密码: liang"
-echo "================================"
+# 深度清理残留配置
+sudo find /etc -name "*x-ui*" -exec rm -rf {} \; 2>/dev/null
+sudo find /var/lib -name "*x-ui*" -exec rm -rf {} \; 2>/dev/null
+
+# 重置系统服务状态
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
+
+# 可选：移除依赖包（默认注释）
+# sudo apt remove -y --purge sqlite3 expect 2>/dev/null
+
+# 验证清理结果
+echo "================验证报告================"
+echo "[服务状态] $(systemctl is-active x-ui 2>/dev/null || echo '服务未运行')"
+echo "[残留文件] $(ls /etc/x-ui 2>/dev/null || echo '无配置文件残留')"
+echo "[端口监听] $(ss -tunlp | grep :2024 || echo '无端口占用')"
+echo "========================================"
