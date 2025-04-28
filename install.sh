@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# 一键安装 x-ui + 自动设置账号密码端口（绕过安全限制，完全自动化）
+# 一键安装指定版本的 x-ui (不更新)
+# 避免更新 x-ui 面板，避免强制修改密码和端口的提示
 
 USERNAME="liang"
 PASSWORD="liang"
@@ -23,34 +24,53 @@ else
     exit 1
 fi
 
-# 安装x-ui
-green "开始安装 x-ui..."
-bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+# 指定版本的 x-ui 安装（避免更新）
+XUI_VERSION="v0.9.6"  # 替换为你想要安装的版本
+green "开始下载 x-ui ${XUI_VERSION} 安装包..."
+wget "https://github.com/vaxilu/x-ui/releases/download/${XUI_VERSION}/x-ui-linux-amd64-${XUI_VERSION}.tar.gz" -O /tmp/x-ui.tar.gz
 
-# 停止x-ui服务
-green "停止x-ui服务以便修改配置文件..."
-systemctl stop x-ui
+# 解压并安装
+green "解压并安装 x-ui ${XUI_VERSION}..."
+tar -zxvf /tmp/x-ui.tar.gz -C /usr/local/
+cd /usr/local/x-ui
 
-# 修改配置文件中的账号、密码和端口
-green "修改配置文件，设置账号密码和端口..."
-CONFIG_FILE="/usr/local/x-ui/x-ui.conf"
-if [ -f "$CONFIG_FILE" ]; then
-    # 通过 sed 命令修改配置文件中的账号、密码和端口
-    sed -i "s/\"username\":.*/\"username\": \"${USERNAME}\",/" $CONFIG_FILE
-    sed -i "s/\"password\":.*/\"password\": \"${PASSWORD}\",/" $CONFIG_FILE
-    sed -i "s/\"port\":.*/\"port\": ${PORT},/" $CONFIG_FILE
-else
-    red "配置文件不存在，无法修改！"
-    exit 1
-fi
+# 创建配置文件并设置账号密码和端口
+green "创建配置文件并设置账号密码和端口..."
+cat > /usr/local/x-ui/x-ui.conf <<EOF
+{
+    "username": "${USERNAME}",
+    "password": "${PASSWORD}",
+    "port": ${PORT},
+    "ssl": false
+}
+EOF
 
-# 启动x-ui服务并设置开机自启
-green "启动x-ui服务并设置开机自启..."
-systemctl restart x-ui
+# 设置服务并启动
+green "设置 x-ui 服务..."
+chmod +x /usr/local/x-ui/x-ui
+cp /usr/local/x-ui/x-ui /usr/bin/x-ui
+
+# 创建系统服务
+echo -e "[Unit]
+Description=x-ui service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/x-ui
+Restart=on-failure
+LimitNOFILE=4096
+User=root
+
+[Install]
+WantedBy=multi-user.target" > /etc/systemd/system/x-ui.service
+
+# 启动并设置开机自启
+systemctl daemon-reload
 systemctl enable x-ui
+systemctl start x-ui
 
-# 防火墙设置
-green "配置防火墙放行端口..."
+# 配置防火墙放行端口
+green "配置防火墙放行端口 ${PORT}..."
 if command -v ufw &> /dev/null; then
     ufw allow "${PORT}/tcp"
     ufw reload
@@ -61,10 +81,10 @@ else
     green "未检测到常规防火墙，跳过放行步骤"
 fi
 
-# 显示最终访问信息
+# 显示安装信息
 IP=$(curl -s ipv4.ip.sb)
 echo "======================================="
-echo "✅ x-ui 安装并设置完成！"
+echo "✅ x-ui ${XUI_VERSION} 安装并设置完成！"
 echo "访问地址: http://${IP}:${PORT}"
 echo "账号: ${USERNAME}"
 echo "密码: ${PASSWORD}"
