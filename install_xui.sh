@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 一键安装/更新 x-ui，并强制设置账号、密码、端口
+# 一键安装 x-ui + 自动设置账号密码端口（无证书版）
 
 USERNAME="liang"
 PASSWORD="liang"
@@ -18,19 +18,16 @@ apt update -y && apt install -y curl wget sudo socat openssl bash-completion || 
 green "开始安装/更新 x-ui..."
 bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 
-# 开机自启
-systemctl enable x-ui
-systemctl restart x-ui
-
-# 强制设置账户、密码、端口
-green "强制设置账号、密码、端口..."
+# 设置账号密码端口
+green "设置账号密码端口..."
 if [ -f "/usr/local/x-ui/x-ui" ]; then
-    /usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}"
-    /usr/local/x-ui/x-ui setting -port "${PORT}"
+    /usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}" -port "${PORT}"
+    systemctl enable x-ui
     systemctl restart x-ui
-    green "账号密码端口设置完成，已自动重启 x-ui。"
+    green "账号密码端口设置完成，x-ui已自动重启！"
 else
     red "x-ui程序未找到，设置失败！"
+    exit 1
 fi
 
 # 配置防火墙放行端口
@@ -45,10 +42,10 @@ else
     green "未检测到常用防火墙，跳过放行步骤。"
 fi
 
-# 显示访问信息
+# 最后显示访问信息
 IP=$(curl -s ipv4.ip.sb)
 echo "======================================="
-echo "✅ x-ui 安装/更新并设置完成！"
+echo "✅ x-ui 安装并设置完成！"
 echo "访问地址: http://${IP}:${PORT}"
 echo "账户: ${USERNAME}"
 echo "密码: ${PASSWORD}"
