@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 智能全自动安装 x-ui + 自动设置账号密码端口
+# 一键安装 x-ui + 自动配置自签证书 + 设置账号密码端口
 # 作者：tanyuliang895
 # 日期：2025-04-28
 
@@ -11,7 +11,7 @@ PORT="2024"
 green(){ echo -e "\033[32m$1\033[0m"; }
 red(){ echo -e "\033[31m$1\033[0m"; }
 
-# 确保脚本是以root身份运行
+# 确保脚本是以 root 身份运行
 [[ $EUID -ne 0 ]] && red "请使用 root 用户运行！" && exit 1
 
 # 检测操作系统类型
@@ -64,9 +64,14 @@ else
     yellow "检测到 x-ui 已安装，跳过安装步骤。"
 fi
 
+# 创建证书目录并生成自签证书
+green "生成自签名证书..."
+mkdir -p /etc/x-ui-cert
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/C=CN/ST=Internet/L=Cloud/O=SelfSigned/OU=IT/CN=${IP}" -keyout /etc/x-ui-cert/private.key -out /etc/x-ui-cert/cert.crt
+
 # 配置 x-ui 面板
 green "自动配置账号、密码、端口..."
-/usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}" -port "${PORT}"
+/usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}" -port "${PORT}" -cert /etc/x-ui-cert/cert.crt -key /etc/x-ui-cert/private.key
 
 # 启动并设置 x-ui 开机自启
 systemctl enable x-ui
@@ -96,7 +101,7 @@ fi
 # 显示面板信息
 echo -e "\n============================================"
 green "x-ui 安装完成！面板信息如下："
-echo "访问地址: http://${IP}:${PORT}"
+echo "访问地址: https://${IP}:${PORT}"
 echo "账号: ${USERNAME}"
 echo "密码: ${PASSWORD}"
 echo "============================================"
