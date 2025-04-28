@@ -1,59 +1,36 @@
 #!/bin/bash
-# 终极优化版脚本（增加错误处理与日志记录）
-LOG_FILE="/tmp/x-ui-install.log"
+# x-ui 完全卸载清理脚本（Ubuntu）
 
-# 函数：错误中断处理
-function handle_error {
-    echo "安装失败！查看日志: $LOG_FILE"
-    exit 1
-}
+# 停止并禁用服务
+sudo systemctl stop x-ui 2>/dev/null
+sudo systemctl disable x-ui 2>/dev/null
 
-trap handle_error ERR
+# 删除相关文件
+sudo rm -rf /etc/x-ui              # 配置文件目录
+sudo rm -f /usr/local/x-ui         # 主程序目录
+sudo rm -f /etc/systemd/system/x-ui.service  # 服务文件
 
-# 步骤1：系统准备
-sudo apt update >> $LOG_FILE 2>&1
-sudo apt install -y curl expect sqlite3 ufw >> $LOG_FILE 2>&1
+# 清理防火墙规则
+sudo ufw delete allow 2024/tcp 2>/dev/null   # 根据实际端口修改
+sudo ufw --force reload
 
-# 步骤2：交互式参数收集
-read -p "请输入用户名 (默认liang): " USERNAME
-USERNAME=${USERNAME:-liang}
-read -sp "请输入密码 (默认liang): " PASSWORD
-PASSWORD=${PASSWORD:-liang}
-echo
-read -p "请输入端口 (默认2024): " PORT
-PORT=${PORT:-2024}
+# 删除日志文件
+sudo journalctl --vacuum-time=1d    # 清理1天前的日志
+sudo rm -f /var/log/x-ui.log 2>/dev/null
 
-# 步骤3：自动化安装
-curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh -o x-ui_install.sh
-sudo expect <<EOF >> $LOG_FILE 2>&1
-spawn bash x-ui_install.sh
-expect "是否继续安装*" { send "y\r" }
-expect "请输入面板端口*" { send "$PORT\r" }
-expect "请输入面板账号*" { send "$USERNAME\r" }
-expect "请输入面板密码*" { send "$PASSWORD\r" }
-expect eof
-EOF
+# 删除安装脚本残留
+rm -f x-ui_install.sh 2>/dev/null
 
-# 步骤4：防覆盖加固
-sudo sqlite3 /etc/x-ui/x-ui.db <<SQL
-UPDATE user SET password='$(echo -n "$PASSWORD" | sha256sum | awk '{print $1}')';
-UPDATE setting SET value='$PORT' WHERE key='webPort';
-INSERT INTO setting (key, value) VALUES ('install_time', '2099-01-01') ON CONFLICT(key) DO UPDATE SET value='2099-01-01';
-SQL
+# 重置系统配置
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
 
-# 步骤5：服务验证
-sudo systemctl restart x-ui
-if ! systemctl is-active --quiet x-ui; then
-    echo "[错误] x-ui 服务未启动！"
-    journalctl -u x-ui -n 50 >> $LOG_FILE
-    handle_error
-fi
+# 可选：移除依赖包（谨慎操作）
+# sudo apt remove -y --purge sqlite3 expect 2>/dev/null
 
-# 结果输出
 echo "================================"
-echo "✅ 安装成功！验证信息："
-echo "地址: $(curl -s ifconfig.me)"
-echo "端口: $PORT"
-echo "账号: $USERNAME"
-echo "密码: $(sed 's/./*/g' <<< "$PASSWORD")"
+echo "✅ 已执行深度清理！残留痕迹检查："
+echo "服务状态: $(systemctl is-active x-ui 2>/dev/null || echo '未运行')"
+echo "残留文件: $(ls /etc/x-ui 2>/dev/null || echo '无')"
+echo "端口监听: $(ss -tunlp | grep 2024 || echo '无')"
 echo "================================"
