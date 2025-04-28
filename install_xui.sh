@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# 一键安装 x-ui（无证书版）
+# 一键安装 x-ui（全自动版，无证书）
 # 作者：tanyuliang895
 # 日期：2025-04-28
 
+# 固定账号密码端口
 USERNAME="liang"
 PASSWORD="liang"
 PORT="2024"
@@ -29,8 +30,8 @@ bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 systemctl enable x-ui
 systemctl restart x-ui
 
-# 配置账号密码端口（不配置TLS证书）
-green "配置账号、密码、端口（无TLS证书）..."
+# 直接设置账号密码端口
+green "配置账号、密码、端口..."
 /usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}"
 /usr/local/x-ui/x-ui setting -port "${PORT}"
 
@@ -56,5 +57,5 @@ green "x-ui 安装完成！"
 echo "访问地址: http://${IP}:${PORT}"
 echo "账号: ${USERNAME}"
 echo "密码: ${PASSWORD}"
-echo "（直接使用http访问，不需要TLS证书）"
+echo "（直接http访问，不需要TLS证书）"
 echo "============================================"
