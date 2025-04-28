@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 一键安装 x-ui 并自动配置证书、账号密码端口
+# 一键安装 x-ui（无证书版）
 # 作者：tanyuliang895
 # 日期：2025-04-28
 
@@ -21,19 +21,6 @@ apt update -y && apt install -y curl wget sudo socat openssl bash-completion net
     exit 1
 }
 
-# 创建证书目录
-mkdir -p /etc/x-ui-cert
-
-# 获取服务器公网 IP
-IP=$(curl -s ipv4.ip.sb || curl -s ipinfo.io/ip)
-
-# 生成自签TLS证书
-green "生成自签名TLS证书..."
-openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-    -subj "/C=CN/ST=Internet/L=Cloud/O=SelfSigned/OU=IT/CN=${IP}" \
-    -keyout /etc/x-ui-cert/private.key \
-    -out /etc/x-ui-cert/cert.crt
-
 # 安装x-ui面板
 green "下载安装 x-ui 面板..."
 bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
@@ -42,13 +29,10 @@ bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 systemctl enable x-ui
 systemctl restart x-ui
 
-# 配置账号密码端口和TLS证书
-green "配置账号、密码、端口及TLS证书..."
+# 配置账号密码端口（不配置TLS证书）
+green "配置账号、密码、端口（无TLS证书）..."
 /usr/local/x-ui/x-ui setting -username "${USERNAME}" -password "${PASSWORD}"
 /usr/local/x-ui/x-ui setting -port "${PORT}"
-/usr/local/x-ui/x-ui setting -cert "/etc/x-ui-cert/cert.crt"
-/usr/local/x-ui/x-ui setting -key "/etc/x-ui-cert/private.key"
-/usr/local/x-ui/x-ui setting -tls true
 
 # 重启x-ui服务
 systemctl restart x-ui
@@ -66,11 +50,11 @@ else
 fi
 
 # 最后输出提示信息
+IP=$(curl -s ipv4.ip.sb || curl -s ipinfo.io/ip)
 echo -e "\n============================================"
 green "x-ui 安装完成！"
-echo "访问地址: https://${IP}:${PORT}"
+echo "访问地址: http://${IP}:${PORT}"
 echo "账号: ${USERNAME}"
 echo "密码: ${PASSWORD}"
-echo "（如果浏览器提示证书不安全，请忽略继续访问）"
+echo "（直接使用http访问，不需要TLS证书）"
 echo "============================================"
-
