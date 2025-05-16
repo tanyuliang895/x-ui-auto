@@ -1,76 +1,39 @@
 #!/bin/bash
-# 一键上传脚本到 GitHub（修复版）
-# 作者：tanyuliang895
-# 用法：bash github-upload.sh
+# X-UI 一键安装脚本（用户名: liang, 密码: liang, 端口: 2024）
+# 用法：bash <(curl -Ls https://raw.githubusercontent.com/tanyuliang895/x-ui-auto/main/install.sh)
 
-# 设置脚本名称和内容（可自定义）
-SCRIPT_NAME="install.sh"
-SCRIPT_CONTENT='#!/bin/bash
-# x-ui 自动安装脚本
-# 用户名: liang
-# 密码: liang
-# 端口: 2024
+# 配置参数（根据你的需求硬编码）
+USERNAME="liang"   # 用户名
+PASSWORD="liang"   # 密码
+PORT="2024"        # 端口
 
-bash <(curl -Ls https://raw.githubusercontent.com/FranzKafkaYu/x-ui/master/install.sh) <<EOF
-y
-liang
-liang
-2024
-EOF
-'
+# 自动安装逻辑
+set -e  # 任何错误立即终止
+echo "🔧 正在安装 X-UI (用户名: $USERNAME, 端口: $PORT)..."
 
-# ------------------------- 核心逻辑 -------------------------
-set -e  # 任何错误立即终止脚本
-
-# 创建脚本文件
-echo "$SCRIPT_CONTENT" > "$SCRIPT_NAME"
-echo "✅ 脚本文件 $SCRIPT_NAME 已创建！"
-
-# 安装 Git（如果未安装）
-if ! command -v git &> /dev/null; then
-  echo "🔧 正在安装 Git..."
-  sudo apt-get update && sudo apt-get install git -y || { echo "❌ Git 安装失败"; exit 1; }
+# 依赖检查（自动安装 curl）
+if ! command -v curl &> /dev/null; then
+  echo "安装依赖: curl..."
+  if [ -x "$(command -v apt-get)" ]; then
+    sudo apt-get update && sudo apt-get install -y curl
+  elif [ -x "$(command -v yum)" ]; then
+    sudo yum install -y curl
+  else
+    echo "❌ 错误：不支持的系统！请手动安装 curl 后重试。"
+    exit 1
+  fi
 fi
 
-# 配置 Git 用户信息（强制交互输入）
-configure_git_user() {
-  if [ -z "$(git config --global user.name)" ]; then
-    read -p "👉 请输入 GitHub 用户名: " GIT_USER
-    git config --global user.name "$GIT_USER"
-  else
-    GIT_USER=$(git config --global user.name)
-  fi
+# 执行安装命令
+bash <(curl -Ls https://raw.githubusercontent.com/FranzKafkaYu/x-ui/master/install.sh) <<EOF
+y
+$USERNAME
+$PASSWORD
+$PORT
+EOF
 
-  if [ -z "$(git config --global user.email)" ]; then
-    read -p "👉 请输入 GitHub 邮箱: " GIT_EMAIL
-    git config --global user.email "$GIT_EMAIL"
-  fi
-}
-configure_git_user
-
-# 输入仓库信息
-read -p "👉 请输入 GitHub 仓库名称（例如 my-x-ui）: " REPO_NAME
-read -p "👉 请输入仓库描述（可选）: " REPO_DESC
-
-# 初始化 Git 仓库
-echo "🚀 正在初始化仓库..."
-git init
-git config init.defaultBranch main  # 强制使用 main 分支
-git add "$SCRIPT_NAME"
-git commit -m "添加自动安装脚本"
-
-# 创建 GitHub 仓库（使用 GitHub API）
-echo "📡 正在创建远程仓库..."
-curl -u "$GIT_USER" \
-  -X POST \
-  -H "Accept: application/vnd.github.v3+json" \
-  https://api.github.com/user/repos \
-  -d "{\"name\":\"$REPO_NAME\", \"description\":\"$REPO_DESC\", \"private\":false}" > /dev/null 2>&1
-
-# 关联并推送代码
-echo "📤 正在上传代码..."
-git remote add origin "https://github.com/$GIT_USER/$REPO_NAME.git"
-git branch -M main  # 强制重命名分支为 main
-git push -u origin main
-
-echo "🎉 完成！脚本已上传至：https://github.com/$GIT_USER/$REPO_NAME"
+# 输出访问信息
+echo -e "\n\033[32m✅ 安装完成！\033[0m"
+echo "访问地址: http://$(curl -4s icanhazip.com):$PORT"
+echo "用户名: $USERNAME"
+echo "密码: $PASSWORD"
